@@ -61,6 +61,7 @@ class ChatServer {
 public:
     ChatServer(boost::asio::io_context& io_context, short port)
         : acceptor_(io_context, tcp::endpoint(tcp::v4(), port)) {
+        std::cout << "Chat server v1.0 started" << std::endl;
         do_accept();  // Start accepting connections
     }
 
