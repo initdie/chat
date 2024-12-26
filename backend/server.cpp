@@ -17,10 +17,13 @@ struct ChatMessage {
 class ChatSession : public std::enable_shared_from_this<ChatSession> {
 public:
     ChatSession(tcp::socket socket)
-        : socket_(std::move(socket)) {}    // Takes ownership of the socket
+        : socket_(std::move(socket)) {
+        write_msg_.length = 0;  // Initialize write buffer
+    }
 
     void start() {
-        do_read();  // Start reading from client
+        do_read();
+        do_write();  // Start both reading and writing loops
     }
 
 private:
@@ -32,9 +35,13 @@ private:
             [this, self](boost::system::error_code ec, std::size_t length) {
                 if (!ec) {
                     read_msg_.length = length;
-                    // Print received message
                     std::cout << "Received: " << std::string(read_msg_.data, length) << std::endl;
-                    do_write();  // Echo message back
+                    
+                    // Copy message to write buffer for echo
+                    std::memcpy(write_msg_.data, read_msg_.data, length);
+                    write_msg_.length = length;
+                    
+                    do_read();  // Continue reading
                 }
             });
     }
@@ -42,18 +49,29 @@ private:
     // Asynchronously write back to client
     void do_write() {
         auto self(shared_from_this());
-        boost::asio::async_write(
-            socket_,
-            boost::asio::buffer(read_msg_.data, read_msg_.length),
-            [this, self](boost::system::error_code ec, std::size_t /*length*/) {
-                if (!ec) {
-                    do_read();  // Continue reading after write completes
-                }
+        if (write_msg_.length > 0) {  // Only write if we have data
+            boost::asio::async_write(
+                socket_,
+                boost::asio::buffer(write_msg_.data, write_msg_.length),
+                [this, self](boost::system::error_code ec, std::size_t /*length*/) {
+                    if (!ec) {
+                        write_msg_.length = 0;  // Reset write buffer
+                        do_write();  // Continue writing loop
+                    }
+                });
+        } else {
+            // No data to write, wait a bit and check again
+            auto timer = std::make_shared<boost::asio::steady_timer>(socket_.get_executor(), 
+                std::chrono::milliseconds(100));
+            timer->async_wait([this, self, timer](boost::system::error_code) {
+                do_write();
             });
+        }
     }
 
     tcp::socket socket_;        // Socket for client connection
     ChatMessage read_msg_;      // Buffer for incoming messages
+    ChatMessage write_msg_;     // Buffer for outgoing messages
 };
 
 // Main server class
